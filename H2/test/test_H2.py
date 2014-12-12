@@ -8,3 +8,4 @@ def test_H2numbers():
     
     assert H2.numbers2string(Jup, Jlow, vup, vlow) == '0-4 P(1)'
     assert H2.string2numbers('0-4 P(1)') == (Jup, Jlow, vup, vlow)
+    assert H2.string2numbers('P(1) 0-4') == (Jup, Jlow, vup, vlow)

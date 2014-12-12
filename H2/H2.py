@@ -70,5 +70,9 @@ def string2numbers(code):
     vl : int
         vibrational quantum number of lower level
     '''
-    m = re.match('[H2 ]*(?P<vu>[0-9]+)-(?P<vl>[0-9]+)\s(?P<dJ>[PR])\((?P<Jl>[0-9]+)\)', code)
+    H2line = '[H2 ]*(?P<vu>[0-9]+)-(?P<vl>[0-9]+)\s(?P<dJ>[PR])\((?P<Jl>[0-9]+)\)'
+    H2_line_order_reversed = '[H2 ]*(?P<dJ>[PR])\((?P<Jl>[0-9]+)\)\s(?P<vu>[0-9]+)-(?P<vl>[0-9]+)'
+    m = re.match(H2line, code)
+    m1 = re.match(H2_line_order_reversed, code)
+    m = m if m is not None else m1
     return int(m.group('Jl')) + delta_J_letter2number[m.group('dJ')], int(m.group('Jl')), int(m.group('vu')), int(m.group('vl'))
