@@ -1,12 +1,25 @@
+
+
+
+
 import os
 from itertools import groupby
 
 import numpy as np
 
 import sherpa.astro.ui as ui
+# Sherpa currently screws up the logger. This is a workaround:
+import logging
+import sys
+logging.getLogger('sherpa').propagate = 0
+sys.tracebacklimit = None
+
+from sherpa.data import Data1D
+
+
+from spectrum import Spectrum
+
 from H2 import read_Abgrall93
-import pychips as ch
-import pycrates as cr
 
 # small helper scripts
 def _isfloat(value):
@@ -62,6 +75,13 @@ def _place_val(line, name, val):
         oldval.append(str(val))
         line[name] = ' '.join(oldval)
         
+
+def _parminmax(res, par):
+    if par in res.parnames:
+        i = res.parnames.index(par)
+        return res.parmins[i], res.parmaxes[i]
+    else:
+        return 0,0
 
  
 def set_wave(model, wave):
@@ -180,26 +200,14 @@ def interpret_line_code(code, Abgrall93, oldformat=False):
           
         
         
-class Datafile(object):
-    def __init__(self, filename):
-        self.filename = filename
-        self.fileobject = cr.read_file(filename)
-        self.wave = self.fileobject.get_column('wavelength')
-        self.flux = self.fileobject.get_column('flux')
-        self.error = self.fileobject.get_column('error')
-        if self.wave.values.shape[0] == 2:
-            self.FN = 'F'
-        elif self.wave.values.shape[0] == 3:
-            self.FN = 'N'
-        self.detector = None
+class Datafile(Spectrum):
+    def __init__(self, *args, **kwargs):
+        super(Datafile, self).__init__(*args, **kwargs)
+        self.data = Data1D(1, self.disp, self.flux, self.error)
 
-    def load_detector(self, i):
-        ui.load_arrays(1, self.wave.values[i,:], self.flux.values[i,:], self.error.values[i,:])
-        self.detector = i
 
     def fit_all(self, regions, outfile, conf=False):
         for region in regions:
-            #print region
             if region.FN == self.FN:
                 if self.detector != region.detector:
                     self.load_detector(region.detector)
@@ -208,12 +216,108 @@ class Datafile(object):
                 region.append_to_csv(outfile, conf=conf)
 
 
+# This should go in a project specific file.
+# While the rest of this file is project almost agnostic.
+from sherpa import models
+from sherpa.astro import models as astromodels
+
+# Make one instance of every type of model that we need
+# and set sensible defaults for the numbers.
+constbase = models.Const1D('baseconst')
+constbase.c0 = 5e-14
+
+linebase = astromodels.Lorentz1D('linebase')
+linebase.fwhm = 0.07
+linebase.fwhm.min = .04
+linebase.fwhm.max = 1.
+linebase.ampl.max = 5e-12
+linebase.ampl = 2e-13
+linebase.ampl.min = 0
+
+abslinebase = linebase.__class__('abslinebase')
+copy_pars(linebase, abslinebase)
+abslinebase.ampl.min = -2e-12
+abslinebase.ampl = -2e-13
+abslinebase.ampl.max = 0
+
+H2linebase = linebase.__class__('H2linebase')
+copy_pars(linebase, H2linebase)
+H2linebase.fwhm.max = 0.09
+H2linebase.ampl.max = 1e-12
+H2linebase.fwhm.val = 0.05681
+H2linebase.fwhm.fixed = True
+
+modelselector = [('const', constbase),
+                 ('H2 ', H2linebase),
+                 ('\?ab', abslinebase),
+                 ('\?', linebase)]
+
+# From here on it's general again
+import re
+
+
+def name2model(name, modelselector):
+    '''Instantiate a Sherpa model based on a string model name
+
+    Parameters
+    ----------
+    name : string
+        ``name`` should identify a line.
+        This string is also used as the name for a model in the sherpa.ui interface.
+    modelselector : list of tuples
+        Each tuple should consist of at least two parts:
+            1) A regular expression
+            2) A Sherpa model **instance** (not class)
+
+    Returns
+    -------
+    newmodel : sherpa model instance
+        The newly created sherpa model.
+
+    Example
+    -------
+    In this example we want to create models for a constant and Gaussian lines::
+
+        >>> from sherpa import models
+        >>> baseline  = models.Gauss1D('baseline')
+        >>> baseconst = models.Const1D('baseconst')
+
+    Because the base models are model instances, their parameters
+    can be changed and those will be copied to all models created by this
+    function::
+
+        >>> baseline.fwhm = 0.1
+
+    So, we now have a list of strings that specify which models we want::
+
+        >>> modelnames = ['consto7', 'O_VII_r', 'O_VII_i, 'O_VII_f']
+
+    All models starting with ``'const'`` shall be constants, all others
+    shall be lines. The function tries the list from the first to the last item.
+    If ``'const'`` matches, it returns the ``baseconst`` model, if not a
+    ``baseline`` model (The regular expression ``'.*'`` matches anything except
+    newline)::
+
+        >>> modelselector = [('const', baseconst), ('.*', baseline)]
+        >>> o7_modellist = [name2model(s, modelselector) for s in modelnames]
+    '''
+
+        
+    for m in modelselector:
+        if re.match(m[0], name):
+            newmodel = m[1].__class__(name)
+            copy_pars(m[1], newmodel)
+            return newmodel
+
+    raise ValueError('No model definition found for {0}.'.format(name))
+        
+
 class Region(object):
 
     plotpath = '/data/guenther/TWHyaplots'
     printfiletype = '.png'
 
-    def __init__(self, region, oldformat=False, Abgrall93 = None):
+    def __init__(self, region, Abgrall93 = None):
         '''Read Gabriel's spreadsheet
 
         This spreadsheet lists which regions and which lines should be fitted
@@ -223,57 +327,31 @@ class Region(object):
         if Abgrall93 is None:
             Abgrall93=read_Abgrall93()
                           
-        if oldformat:
-            name  = region[0]
-            FN = region[1]
-            if FN[0] == '"':
-                 FN = FN[1:-1]
+        name  = region[0][0]
+        FN = region[0][1]
+        if FN[0] == '"':
+             FN = FN[1:-1]
 
-            self.name = name
-            self.FN = FN[0]
-            self.detector = int(FN[2])
-            self.start = float(region[2])
-            self.stop = float(region[3])
+        self.name = name
+        self.FN = FN[0]
+        self.detector = int(FN[2])
+        self.start = float(region[0][2])
+        self.stop = float(region[0][3])
+        self.const = region[0][5]
 
-            self.const = 1e-13
-
-            self.H2lines = []
-            self.nonH2lines = []
-            for line in region[4:]:
-                 if len(line) > 0:
-                    name, wave, absorption = interpret_line_code(line, 
-                                                             Abgrall93, oldformat=True)
-                    if name[0] in 'PRH':
-                        self.H2lines.append({'name': 'H2 '+name, 'wave': wave, 'abs': absorption})
-                    else:
-                        self.nonH2lines.append({'name': name, 'wave': wave, 'abs': absorption})
-        # new format
-        else:
-            name  = region[0][0]
-            FN = region[0][1]
-            if FN[0] == '"':
-                 FN = FN[1:-1]
-
-            self.name = name
-            self.FN = FN[0]
-            self.detector = int(FN[2])
-            self.start = float(region[0][2])
-            self.stop = float(region[0][3])
-            self.const = region[0][5]
-
-            self.H2lines = []
-            self.nonH2lines = []
-            for line in region:
-                print line 
-                if len(line) > 0:
-                    name, wave, absorption = interpret_line_code(line[8], 
-                                                             Abgrall93)
-                    if name[0:2] == 'H2':
-                        # ignore the pos value for H2 lines.
-                        # will be set from Abgrall line list
-                        self.H2lines.append({'name': name, 'wave': wave, 'abs': absorption, 'fwhm': line[11], 'ampl': line[12]})
-                    else:
-                        self.nonH2lines.append({'name': name, 'wave': wave, 'abs': absorption, 'pos': line[10], 'fwhm': line[11], 'ampl': line[12]})
+        self.H2lines = []
+        self.nonH2lines = []
+        for line in region:
+            print line 
+            if len(line) > 0:
+                name, wave, absorption = interpret_line_code(line[8], 
+                                                         Abgrall93)
+                if name[0:2] == 'H2':
+                    # ignore the pos value for H2 lines.
+                    # will be set from Abgrall line list
+                    self.H2lines.append({'name': name, 'wave': wave, 'abs': absorption, 'fwhm': line[11], 'ampl': line[12]})
+                else:
+                    self.nonH2lines.append({'name': name, 'wave': wave, 'abs': absorption, 'pos': line[10], 'fwhm': line[11], 'ampl': line[12]})
 
 
     def set_source(self):
@@ -390,9 +468,21 @@ class Region(object):
             self.const_max = parmax
 
 
-
     def plot(self, filename=''):
+        try:
+            import chips as ch
+            self.plot_chips(filename=filename)
+        except ImportError:
+            import matplotlib as mpl
+            import matplotlib.pyplot as plt
+            self.plot(mpl(filename=filename)
+
+    def plot_mpl(self, filename=''):
+        raise NotImplementedError
+
+    def plot_chips(self, filename=''):
         ui.plot_fit_delchi(1)
+        fig = plt.gcf()
         ch.add_label(0.5, 0.97, self.name + '_'+filename,
                      ["coordsys", ch.FRAME_NORM])
 
@@ -425,12 +515,3 @@ class Region(object):
                     outfile.write('{0},{1} {2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12},{13}\n'.format(self.name, self.FN, self.detector, self.start, self.stop, self.redchi2, self.const, 'constmin', 'constmax', line['name'], line['wave'], line['pos'], line['fwhm'], line['ampl']))
 
 
-
-# define some helper functions
-
-def _parminmax(res, par):
-    if par in res.parnames:
-        i = res.parnames.index(par)
-        return res.parmins[i], res.parmaxes[i]
-    else:
-        return 0,0
