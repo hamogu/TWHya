@@ -1,6 +1,10 @@
 import re
+import os
 
-Abgrall93file = '/data/hguenther/misc/H2/MOLAT/fichiers_BCan94'
+import numpy as np
+
+Abgrall93file = os.path.join(os.path.dirname(__file__), 'data', 'MOLAT', 'fichiers_BCan94')
+
 
 def read_Abgrall93(filename=None):
     '''Read the Abgrall 1993 line list of Lyman band transitions
@@ -8,7 +12,7 @@ def read_Abgrall93(filename=None):
     Parameters
     ----------
     filename : string or None
-        If filename is ``None`` use the module level variable 
+        If filename is ``None`` use the module level variable
         ``Abgrall93file``
 
     Returns
@@ -19,7 +23,9 @@ def read_Abgrall93(filename=None):
     '''
     if filename is None:
         filename = Abgrall93file
-    data = np.loadtxt(filename, skiprows=3, dtype=[('vu','i4'), ('Ju','i4'), ('vl','i4'), ('Jl','i4'), ('A','f4'), ('wavenumber','f8')])
+    data = np.loadtxt(filename, skiprows=3,
+                      dtype=[('vu', 'i4'), ('Ju', 'i4'), ('vl', 'i4'), ('Jl', 'i4'),
+                             ('A', 'f4'), ('wavenumber', 'f8')])
     out = {}
     for d in data:
         code = H2numbers2string()
@@ -28,11 +34,12 @@ def read_Abgrall93(filename=None):
 
 
 delta_J_letter2number = {'R': +1, 'P': -1, 'Q': 0}
-delta_J_number2letter = dict((v,k) for k, v in delta_J_letter2number.iteritems())
+delta_J_number2letter = dict((v, k) for k, v in delta_J_letter2number.iteritems())
+
 
 def numbers2string(Ju, Jl, vu, vl):
     '''convert quantum numbers J_up, J_low, v_up, v_low to string like ``3-4 P(2)``
-    
+
     Parameters
     ----------
     J_u : int
@@ -49,11 +56,11 @@ def numbers2string(Ju, Jl, vu, vl):
     code : string
         string representation of a ro-vibrational H2 line
     '''
-    return '{2}-{3} {0}({1})'.format(delta_J_number2letter[Ju-Jl], Jl, vu, vl)
+    return '{2}-{3} {0}({1})'.format(delta_J_number2letter[Ju - Jl], Jl, vu, vl)
 
 
 def string2numbers(code):
-    '''convert string like ``3-4 P(2)`` to quantum numbers J_up, J_low, v_up, v_low    
+    '''convert string like ``3-4 P(2)`` to quantum numbers J_up, J_low, v_up, v_low
     Parameters
     ----------
     code : string

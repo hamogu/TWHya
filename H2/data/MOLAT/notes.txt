@@ -1,0 +1,33 @@
+http://molat.obspm.fr
+
+
+Line emission Probabilities for B-X (Lyman), C-X (Werner), B'-X and D-X bands of the H2 molecule.
+
+
+
+The data display values up to the J'=25 upper rotational levels
+The data are obtained by performing semiempirical calculations described in the paper:
+- Abgrall, H., Roueff, E., Launay, F., Roncin, J.-Y., 1994, Can. J. Phys., 72, 856-865.
+you can find extended comparison with experiment in:
+Liu X., Ahmed S.M., Multari R.A., James G.K, Ajello J.M., 1995, Astrophys. J. Sup.,101, 375
+
+The database contains the following files:
+BCan94
+for B state (Lyman transitions)
+CmCan94
+for C- state (Werner Q transitions)
+CpCan94
+f or C+ state (Werner P and R transitions)
+BpCan94
+for B' state
+BCan94
+for D- state (Q transitions)
+DpCan94
+for D+ state (P and R transitions)
+
+VU is for v', JU for J', VL for v'', JL for J''.
+The last 2 columns are the transition probabilities and the transition energy.
+The 3rd line indicate the number of lines in the data.
+
+DOWNLOAD    BCan94   CmCan94   CpCan94   BpCan94   DmCan94   DpCan94
+
