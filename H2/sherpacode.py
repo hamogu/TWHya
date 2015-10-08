@@ -1,13 +1,10 @@
-
-
-
-
 import os
 from itertools import groupby
 
 import numpy as np
 
 import sherpa.astro.ui as ui
+
 # Sherpa currently screws up the logger. This is a workaround:
 import logging
 import sys
@@ -15,11 +12,15 @@ logging.getLogger('sherpa').propagate = 0
 sys.tracebacklimit = None
 
 from sherpa.data import Data1D
-
+from sherpa.optmethods import LevMar
+from sherpa.fit import Fit
+from sherpa import models
+from sherpa import stats
 
 from spectrum import Spectrum
 
 from H2 import read_Abgrall93
+
 
 # small helper scripts
 def _isfloat(value):
@@ -29,6 +30,7 @@ def _isfloat(value):
         return True
     except ValueError:
         return False
+
 
 def _set_val(model, argstring, val):
     '''Set the value of a Sherpa model parameter
@@ -57,7 +59,7 @@ def _set_val(model, argstring, val):
                 par.val = float(v)
             else:
                 raise ValueError('Not valid format to set a parameter {0}'.format(v))
-        
+
     else:
         par.frozen = False
         par.val = val
@@ -74,7 +76,7 @@ def _place_val(line, name, val):
         oldval = oldval[0:-1]
         oldval.append(str(val))
         line[name] = ' '.join(oldval)
-        
+
 
 def _parminmax(res, par):
     if par in res.parnames:
@@ -83,7 +85,7 @@ def _parminmax(res, par):
     else:
         return 0,0
 
- 
+
 def set_wave(model, wave):
     model.pos.min = 0
     model.pos.max = 1e5
@@ -109,15 +111,15 @@ def read_spreadsheet(filename):
     for line in filecontent:
         newline = line.strip().split(',')
         regions.append(Region(newline, Abgrall93=Abgrall93, oldformat=True))
-    
+
     return regions
 
 
 def read_output_spreadsheet(filename):
     '''Read a fit result spreadsheet as starting point for a new fit
 
-    This can be used to tweak parameters in the fit result in cases where 
-    the fit got stuck in a local minimum. 
+    This can be used to tweak parameters in the fit result in cases where
+    the fit got stuck in a local minimum.
 
     Parameters
     ----------
@@ -126,7 +128,7 @@ def read_output_spreadsheet(filename):
     Returns
     -------
     regions : list of :class:`Region` instances
-        
+
 
     '''
     Abgrall93 = read_Abgrall93()
@@ -179,7 +181,7 @@ def interpret_line_code(code, Abgrall93, oldformat=False):
         absorption = False
     elif code[0] in 'prPRH':
     #elif (oldformat and (code[0] in 'pr')) or (not oldformat and (code[0:2] == 'H2')):
-            
+
         if oldformat:
             codesplit = code.split()
             name = '{0}({1}) {2}-{3}'.format(code[0].upper(),
@@ -187,19 +189,19 @@ def interpret_line_code(code, Abgrall93, oldformat=False):
         else:
             if code[:3] == 'H2 ':
                 name = code[3:]
-            else: 
+            else:
                 name = code
-        
+
         wave = Abgrall93[name]
         name = 'H2 '+ name
         absorption = False
     else:
         raise ValueError('code: {0} does not have proper format'.format(code))
-    
+
     return name, wave, absorption
-          
-        
-        
+
+
+
 class Datafile(Spectrum):
     def __init__(self, *args, **kwargs):
         super(Datafile, self).__init__(*args, **kwargs)
@@ -216,41 +218,6 @@ class Datafile(Spectrum):
                 region.append_to_csv(outfile, conf=conf)
 
 
-# This should go in a project specific file.
-# While the rest of this file is project almost agnostic.
-from sherpa import models
-from sherpa.astro import models as astromodels
-
-# Make one instance of every type of model that we need
-# and set sensible defaults for the numbers.
-constbase = models.Const1D('baseconst')
-constbase.c0 = 5e-14
-
-linebase = astromodels.Lorentz1D('linebase')
-linebase.fwhm = 0.07
-linebase.fwhm.min = .04
-linebase.fwhm.max = 1.
-linebase.ampl.max = 5e-12
-linebase.ampl = 2e-13
-linebase.ampl.min = 0
-
-abslinebase = linebase.__class__('abslinebase')
-copy_pars(linebase, abslinebase)
-abslinebase.ampl.min = -2e-12
-abslinebase.ampl = -2e-13
-abslinebase.ampl.max = 0
-
-H2linebase = linebase.__class__('H2linebase')
-copy_pars(linebase, H2linebase)
-H2linebase.fwhm.max = 0.09
-H2linebase.ampl.max = 1e-12
-H2linebase.fwhm.val = 0.05681
-H2linebase.fwhm.fixed = True
-
-modelselector = [('const', constbase),
-                 ('H2 ', H2linebase),
-                 ('\?ab', abslinebase),
-                 ('\?', linebase)]
 
 # From here on it's general again
 import re
@@ -302,7 +269,7 @@ def name2model(name, modelselector):
         >>> o7_modellist = [name2model(s, modelselector) for s in modelnames]
     '''
 
-        
+
     for m in modelselector:
         if re.match(m[0], name):
             newmodel = m[1].__class__(name)
@@ -310,23 +277,21 @@ def name2model(name, modelselector):
             return newmodel
 
     raise ValueError('No model definition found for {0}.'.format(name))
-        
+
 
 class Region(object):
 
-    plotpath = '/data/guenther/TWHyaplots'
-    printfiletype = '.png'
-
-    def __init__(self, region, Abgrall93 = None):
+    def __init__(self, region, plotpath='.', printfiletype='.png'):
         '''Read Gabriel's spreadsheet
 
         This spreadsheet lists which regions and which lines should be fitted
         together and where the lines are spaced far enough apart to be treated
         separately.
         '''
-        if Abgrall93 is None:
-            Abgrall93=read_Abgrall93()
-                          
+        self.plotpath = plotpath
+        self.printfiletype = printfiletype
+        Abgrall93=read_Abgrall93()
+
         name  = region[0][0]
         FN = region[0][1]
         if FN[0] == '"':
@@ -342,9 +307,9 @@ class Region(object):
         self.H2lines = []
         self.nonH2lines = []
         for line in region:
-            print line 
+            print line
             if len(line) > 0:
-                name, wave, absorption = interpret_line_code(line[8], 
+                name, wave, absorption = interpret_line_code(line[8],
                                                          Abgrall93)
                 if name[0:2] == 'H2':
                     # ignore the pos value for H2 lines.
@@ -417,7 +382,7 @@ class Region(object):
 
 
         # If the input file specified those values, they take precedence
-        # over the hard-coded default value      
+        # over the hard-coded default value
         for line in (self.H2lines + self.nonH2lines):
             for n in ['pos','fwhm','ampl']:
                 if n in line:
@@ -475,7 +440,7 @@ class Region(object):
         except ImportError:
             import matplotlib as mpl
             import matplotlib.pyplot as plt
-            self.plot(mpl(filename=filename)
+            self.plot_mpl(filename=filename)
 
     def plot_mpl(self, filename=''):
         raise NotImplementedError
@@ -495,9 +460,9 @@ class Region(object):
                          '{0} = {1:8.5g}'.format(res.parnames[i],
                           res.parvals[i]), ["coordsys", ch.FRAME_NORM])
 
-        ch.print_window(os.path.join(self.plotpath, 
+        ch.print_window(os.path.join(self.plotpath,
                                      self.name + filename + self.printfiletype),
-                        {"clobber": True, 'dpi': 300})  
+                        {"clobber": True, 'dpi': 300})
 
 
 

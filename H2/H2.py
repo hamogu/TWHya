@@ -28,8 +28,8 @@ def read_Abgrall93(filename=None):
                              ('A', 'f4'), ('wavenumber', 'f8')])
     out = {}
     for d in data:
-        code = H2numbers2string()
-        out[code] = 1./d['wavenumber'] * 1e8
+        code = numbers2string(d['Ju'], d['Jl'], d['vu'], d['vl'])
+        out[code] = 1. / d['wavenumber'] * 1e8
     return out
 
 
